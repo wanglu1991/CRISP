@@ -40,6 +40,10 @@ public:
 
    unsigned memlatstat_done( class mem_fetch *mf );
    void memlatstat_read_done( class mem_fetch *mf );
+   void record_batch_latency(class mem_fetch *mf );
+
+   void memlatstat_read_done_L2_miss(mem_fetch *mf);
+   void memlatstat_read_done_L2_hit(mem_fetch *mf);
    void memlatstat_dram_access( class mem_fetch *mf );
    void memlatstat_icnt2mem_pop( class mem_fetch *mf);
    void memlatstat_lat_pw();
@@ -65,6 +69,13 @@ public:
    unsigned mf_lat_pw_table[32]; //table storing values of mf latency Per Window
    unsigned mf_num_lat_pw;
    unsigned max_warps;
+   std::vector<unsigned > batch_latency;
+   unsigned long long batch_latency_sum;
+   unsigned number_L2_miss;
+   unsigned long long L2_miss_latency_sum;
+   unsigned number_L2_hit;
+   unsigned long long L2_hit_latency_sum;
+   unsigned number_batch;
    unsigned mf_tot_lat_pw; //total latency summed up per window. divide by mf_num_lat_pw to obtain average latency Per Window
    unsigned long long int mf_total_lat;
    unsigned long long int ** mf_total_lat_table; //mf latency sums[dram chip id][bank id]

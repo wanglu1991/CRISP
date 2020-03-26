@@ -71,6 +71,15 @@ public:
        }
    }
    void do_atomic();
+   void set_L2_miss_info(bool miss)
+     {
+  	   L2_miss=miss;
+     }
+
+     bool get_L2_miss_info()
+     {
+  	   return L2_miss;
+     }
 
    void print( FILE *fp, bool print_inst = true ) const;
 
@@ -99,13 +108,28 @@ public:
    unsigned get_timestamp() const { return m_timestamp; }
    unsigned get_return_timestamp() const { return m_timestamp2; }
    unsigned get_icnt_receive_time() const { return m_icnt_receive_time; }
-
+   void set_Tm_stamp(long long tm) {Tm_timestamp= tm;}
+   long long get_Tm_stamp()
+   {
+	return Tm_timestamp;
+   }
    enum mem_access_type get_access_type() const { return m_access.get_type(); }
    const active_mask_t& get_access_warp_mask() const { return m_access.get_warp_mask(); }
    mem_access_byte_mask_t get_access_byte_mask() const { return m_access.get_byte_mask(); }
 
    address_type get_pc() const { return m_inst.empty()?-1:m_inst.pc; }
    const warp_inst_t &get_inst() { return m_inst; }
+
+   void update_inst_latency(unsigned latency)
+   {
+	   m_inst.update_latency(latency);
+
+   }
+
+   void update_creat_cycle(long long cycle)
+   {
+	   m_inst.update_creat_cycle(cycle);
+   }
    enum mem_fetch_status get_status() const { return m_status; }
 
    const memory_config *get_mem_config(){return m_mem_config;}
@@ -117,8 +141,8 @@ private:
    unsigned m_sid;
    unsigned m_tpc;
    unsigned m_wid;
-
-   // where is this request now?
+   bool L2_miss;
+   // where is this request now
    enum mem_fetch_status m_status;
    unsigned long long m_status_change;
 
@@ -134,7 +158,7 @@ private:
    unsigned m_timestamp;  // set to gpu_sim_cycle+gpu_tot_sim_cycle at struct creation
    unsigned m_timestamp2; // set to gpu_sim_cycle+gpu_tot_sim_cycle when pushed onto icnt to shader; only used for reads
    unsigned m_icnt_receive_time; // set to gpu_sim_cycle + interconnect_latency when fixed icnt latency mode is enabled
-
+   unsigned Tm_timestamp;
    // requesting instruction (put last so mem_fetch prints nicer in gdb)
    warp_inst_t m_inst;
 

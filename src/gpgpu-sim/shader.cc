@@ -333,7 +333,7 @@ void shader_core_ctx::init_warps( unsigned cta_id, unsigned start_thread, unsign
                 }
             }
             m_simt_stack[i]->launch(start_pc,active_threads);
-            m_warp[i].init(start_pc,cta_id,i,active_threads, m_dynamic_warp_id);
+            m_warp[i].init(start_pc,cta_id,i,active_threads, m_dynamic_warp_id,gpu_sim_cycle+gpu_tot_sim_cycle);
             ++m_dynamic_warp_id;
             m_not_completed += n_active;
       }
@@ -377,7 +377,15 @@ void shader_core_stats::print( FILE* fout ) const
 
     fprintf(fout,"gpgpu_n_stall_shd_mem = %d\n", gpgpu_n_stall_shd_mem );
     fprintf(fout,"gpgpu_n_mem_read_local = %d\n", gpgpu_n_mem_read_local);
-    fprintf(fout,"gpgpu_n_mem_write_local = %d\n", gpgpu_n_mem_write_local);
+    fprintf(fout, "average_MSHR_delay=%lld\n", total_MSHR_delay/total_misses);
+    if(divergent_load!=0)
+    {
+    fprintf(fout, "average_divergent_MSHR_delay=%lld\n",divergent_MSHR_delay/divergent_load);
+    fprintf(fout, "average_divergent_load_latency=%lld\n",divergent_load_latency/divergent_load);
+    }
+    fprintf(fout, "total_blocking_misses=%lld\n",block_misses);
+    fprintf(fout,"number_divergent_load = %d\n", divergent_load);
+    fprintf(fout,"number_divergent_miss= %d\n", divergent_miss);
     fprintf(fout,"gpgpu_n_mem_read_global = %d\n", gpgpu_n_mem_read_global);
     fprintf(fout,"gpgpu_n_mem_write_global = %d\n", gpgpu_n_mem_write_global);
     fprintf(fout,"gpgpu_n_mem_texture = %d\n", gpgpu_n_mem_texture);
@@ -595,6 +603,7 @@ void shader_core_ctx::decode()
 
 void shader_core_ctx::fetch()
 {
+
     if( !m_inst_fetch_buffer.m_valid ) {
         // find an active warp with space in instruction buffer that is not already waiting on a cache miss
         // and get next 1-2 instructions from i-cache...
@@ -617,8 +626,11 @@ void shader_core_ctx::fetch()
                     }
                 }
                 if( did_exit ) 
-                    m_warp[warp_id].set_done_exit();
-            }
+                {   m_warp[warp_id].set_done_exit(gpu_sim_cycle+gpu_tot_sim_cycle);
+
+
+
+            }}
 
             // this code fetches instructions from the i-cache or generates memory requests
             if( !m_warp[warp_id].functional_done() && !m_warp[warp_id].imiss_pending() && m_warp[warp_id].ibuffer_empty() ) {
@@ -659,6 +671,24 @@ void shader_core_ctx::fetch()
             }
         }
     }
+  /*
+    if((gpu_sim_cycle+gpu_tot_sim_cycle)%500==0)
+    	 { FILE * number_warp;
+    	                    number_warp=fopen("number_warps","a");
+    	                    if(number_warp!=NULL)
+    	                    { int warps=0;
+    	                    	for(int i=0;i<m_warp.size();i++)
+    	                    	{
+    	                    		if(!m_warp[i].done_exit())
+    	                    			warps++;
+    	                    	}
+    	                    	fprintf(number_warp,"%d,%lld,%d\n",this->m_sid,gpu_sim_cycle+gpu_tot_sim_cycle,warps);
+
+    	                    }
+    	                    fclose(number_warp);
+
+           }
+           */
 
     m_L1I->cycle();
 
@@ -801,6 +831,12 @@ void scheduler_unit::order_by_priority( std::vector< T >& result_list,
 
 void scheduler_unit::cycle()
 {
+    int record=0;
+    int ld_stall=0;
+    int store_stall=0;
+    int sfu_stall=0;
+    int arithmetic_stall=0;
+
     SCHED_DPRINTF( "scheduler_unit::cycle()\n" );
     bool valid_inst = false;  // there was one warp with a valid instruction to issue (didn't require flush due to control hazard)
     bool ready_inst = false;  // of the valid instructions, there was one not waiting for pending register writes
@@ -852,7 +888,17 @@ void scheduler_unit::cycle()
                                 issued_inst=true;
                                 warp_inst_issued = true;
                             }
-                        } else {
+                            else{
+                            	if((!m_scoreboard->checkOutstandingload())&&(m_shader->get_sid()==0))
+                            	 ld_stall++;
+                            	if((m_scoreboard->checkOutstandingload())&&(m_shader->get_sid()==0))
+                            	{
+                            		store_stall++;
+
+                            	}
+
+                        } }
+                            else {
                             bool sp_pipe_avail = m_sp_out->has_free();
                             bool sfu_pipe_avail = m_sfu_out->has_free();
                             if( sp_pipe_avail && (pI->op != SFU_OP) ) {
@@ -868,10 +914,27 @@ void scheduler_unit::cycle()
                                     issued_inst=true;
                                     warp_inst_issued = true;
                                 }
-                            }                         }
+                                else
+                                {
+                                if(m_shader->get_sid()==0)
+                                {sfu_stall++;
+                                 //T_compute++;
+                                }
+                                }
+                            }
+
+                        }
                     } else {
                         SCHED_DPRINTF( "Warp (warp_id %u, dynamic_warp_id %u) fails scoreboard\n",
                                        (*iter)->get_warp_id(), (*iter)->get_dynamic_warp_id() );
+                        //check arithmetic RAW or long memory latency RAW. As long as one warp is stalled due to arithmetic RAW, this cycle should be regarded as compute cycles.
+                        if(!m_scoreboard->check_long_memory_stall(warp_id, pI)) //arithmetic RAW
+                        	arithmetic_stall++;
+                        //
+                        //if(m_shader->get_sid()==0)
+                          //      {T_LCP_stall++;
+                            //    T_mem++;
+                            //	}
                     }
                 }
             } else if( valid ) {
@@ -903,19 +966,57 @@ void scheduler_unit::cycle()
                     m_last_supervised_issued = supervised_iter;
                 }
             }
+            if(m_shader->get_sid()==0)
+            {T_compute++;
+             record=1;
+            }
             break;
         } 
     }
 
     // issue stall statistics:
     if( !valid_inst ) 
-        m_stats->shader_cycle_distro[0]++; // idle or control hazard
+    { m_stats->shader_cycle_distro[0]++; // idle or control hazard
+      if(m_shader->get_sid()==0)
+        {T_compute++;
+         record=1;
+        }
+    }
     else if( !ready_inst ) 
-        m_stats->shader_cycle_distro[1]++; // waiting for RAW hazards (possibly due to memory) 
+    {
+        m_stats->shader_cycle_distro[1]++;
+        if(m_shader->get_sid()==0)
+        { if(arithmetic_stall>0)
+          T_compute++;
+        else
+        {
+          T_LCP_stall++;
+          T_mem++;
+        }
+          record=1;
+        }
+        // waiting for RAW hazards (possibly due to memory)
+    }
     else if( !issued_inst ) 
-        m_stats->shader_cycle_distro[2]++; // pipeline stalled
-}
+    {     //ld/st pipeline stall
 
+        m_stats->shader_cycle_distro[2]++; // pipeline stalled
+        if(store_stall>0)
+        	T_CSP_stall++;
+        else
+        {
+        	if(ld_stall>0)
+        	{
+        		T_mem++;
+        		T_LCP_stall++;
+        	}
+        	else
+        	{	if(m_shader->get_sid()==0)
+        		T_compute++;
+        }
+        }
+    }
+}
 void scheduler_unit::do_on_warp_issued( unsigned warp_id,
                                         unsigned num_issued,
                                         const std::vector< shd_warp_t* >::const_iterator& prioritized_iter )
@@ -1222,6 +1323,13 @@ void shader_core_ctx::warp_inst_complete(const warp_inst_t &inst)
 
   m_stats->m_num_sim_winsn[m_sid]++;
   m_gpu->gpu_sim_insn += inst.active_count();
+  if(inst.active_count()!=0)
+  m_gpu->gpu_warp_sim_insn+=1;
+  if(inst.active_count()!=0)
+  m_warp[inst.warp_id()].increase_instruction();
+  // print ld_inst maximum latency and minimum latency.
+  //if(inst.is_load())
+  //inst.print_latency();
   inst.completed(gpu_tot_sim_cycle + gpu_sim_cycle);
 }
 
@@ -1415,6 +1523,7 @@ bool ldst_unit::memory_cycle( warp_inst_t &inst, mem_stage_stall_type &stall_rea
    } else {
        assert( CACHE_UNDEFINED != inst.cache_op );
        stall_cond = process_memory_access_queue(m_L1D,inst);
+
    }
    if( !inst.accessq_empty() ) 
        stall_cond = COAL_STALL;
@@ -1661,6 +1770,7 @@ void ldst_unit:: issue( register_set &reg_set )
          unsigned reg_id = inst->out[r];
          if (reg_id > 0) {
             m_pending_writes[warp_id][reg_id] += n_accesses;
+
          }
       }
    }
@@ -1682,10 +1792,69 @@ void ldst_unit::writeback()
             for( unsigned r=0; r < 4; r++ ) {
                 if( m_next_wb.out[r] > 0 ) {
                     if( m_next_wb.space.get_type() != shared_space ) {
+                    	if(m_next_wb.get_latency()>0)
+                    	{miss_latency[m_next_wb.warp_id()][m_next_wb.out[r]].push_back(m_next_wb.get_latency());
+                    	 creat_cycle[m_next_wb.warp_id()][m_next_wb.out[r]].push_back(m_next_wb.get_creat_time());
+                    	}
                         assert( m_pending_writes[m_next_wb.warp_id()][m_next_wb.out[r]] > 0 );
                         unsigned still_pending = --m_pending_writes[m_next_wb.warp_id()][m_next_wb.out[r]];
                         if( !still_pending ) {
                             m_pending_writes[m_next_wb.warp_id()].erase(m_next_wb.out[r]);
+
+                            if((miss_latency[m_next_wb.warp_id()][m_next_wb.out[r]].size()>0)&&(m_next_wb.is_load()))
+                                 {
+                            		if(miss_latency[m_next_wb.warp_id()][m_next_wb.out[r]].size()>2)
+                            		{
+                            		 m_stats->divergent_load++;
+                            		 m_stats->divergent_miss+=miss_latency[m_next_wb.warp_id()][m_next_wb.out[r]].size();
+                            		 int divergent_load_MSHR_delay=0;
+                            		 for(int i=0;i<creat_cycle[m_next_wb.warp_id()][m_next_wb.out[r]].size();i++)
+                            		 {
+                            			 int current_miss_MSHR_delay=creat_cycle[m_next_wb.warp_id()][m_next_wb.out[r]][i]-m_next_wb.get_issue_cycle();
+                            			 if(current_miss_MSHR_delay>divergent_load_MSHR_delay)
+                            			    divergent_load_MSHR_delay=current_miss_MSHR_delay;
+                            		 }
+                            		  m_stats->divergent_MSHR_delay+=divergent_load_MSHR_delay;
+                            		  m_stats->divergent_load_latency+=gpu_sim_cycle+gpu_tot_sim_cycle-m_next_wb.get_issue_cycle();
+
+                            		}
+
+                            	  for(int i=0;i<creat_cycle[m_next_wb.warp_id()][m_next_wb.out[r]].size();i++)
+                                 {
+                                	 m_stats->total_MSHR_delay+=creat_cycle[m_next_wb.warp_id()][m_next_wb.out[r]][i]-m_next_wb.get_issue_cycle();
+                                	 m_stats->total_misses+=1;
+                                	 if((creat_cycle[m_next_wb.warp_id()][m_next_wb.out[r]][i]-m_next_wb.get_issue_cycle())>10)
+                                		 m_stats->block_misses+=1;
+
+                                 }
+
+                            	//MSHR delay for each L1 miss = creat_cycle - load.issue_cycle
+
+                                     /*
+
+                                	FILE* f =fopen("ld_latency.txt","a");
+                                    if(f!=NULL)
+                                    {   //fprintf(f,"%lld,",m_next_wb.get_issue_cycle());
+                                        if(miss_latency[m_next_wb.warp_id()][m_next_wb.out[r]].size()>2)
+                                        {
+                                    	for(int i=0;i<miss_latency[m_next_wb.warp_id()][m_next_wb.out[r]].size();i++)
+                                    	{   long MSHR_delay=creat_cycle[m_next_wb.warp_id()][m_next_wb.out[r]][i]-m_next_wb.get_issue_cycle();
+                                    		fprintf(f,"%d,%lld,",miss_latency[m_next_wb.warp_id()][m_next_wb.out[r]][i],MSHR_delay);
+                                    	}
+
+                                    		//fprintf(f,"%d,",miss_latency[m_next_wb.warp_id()][m_next_wb.out[r]][i]);
+                                    	fprintf(f,"\n");
+                                        }
+                                    }
+                                    fclose(f);
+
+                             */
+                            	  //comment: Write file for getting divergent L1 miss latency trace.
+
+                                  }
+
+                            miss_latency[m_next_wb.warp_id()][m_next_wb.out[r]].clear();
+                            creat_cycle[m_next_wb.warp_id()][m_next_wb.out[r]].clear();
                             m_scoreboard->releaseRegister( m_next_wb.warp_id(), m_next_wb.out[r] );
                             insn_completed = true; 
                         }
@@ -1697,6 +1866,7 @@ void ldst_unit::writeback()
             }
             if( insn_completed ) {
                 m_core->warp_inst_complete(m_next_wb);
+
             }
             m_next_wb.clear();
             m_last_inst_gpu_sim_cycle = gpu_sim_cycle;
@@ -2115,7 +2285,8 @@ void gpgpu_sim::shader_print_l1_miss_stat( FILE *fout ) const
       fprintf(fout, "%d ", m_sc[0]->get_thread_n_l1_access_ac(i));
    fprintf(fout, "\n");
 
-   //per warp
+   */
+   /*
    int temp =0; 
    fprintf(fout, "W_L1_Mss: "); //l1 miss rate per warp
    for (unsigned i=0; i<m_shader_config->n_thread_per_shader; i++) {
@@ -2146,7 +2317,7 @@ void gpgpu_sim::shader_print_l1_miss_stat( FILE *fout ) const
       }
    }
    fprintf(fout, "\n");
-   */
+*/
 }
 
 void warp_inst_t::print( FILE *fout ) const
@@ -3283,7 +3454,19 @@ void simt_core_cluster::icnt_inject_request_packet(class mem_fetch *mf)
     case L2_WR_ALLOC_R: m_stats->gpgpu_n_mem_l2_write_allocate++; break;
     default: assert(0);
     }
+    if(!mf->get_is_write()&& (mf->get_sid()==0)&&(mf->get_access_type()==GLOBAL_ACC_R))
+    mf->set_Tm_stamp(T_mem);
 
+ /*
+    if((mf->get_access_type()==GLOBAL_ACC_R)&&(mf->get_sid()==0))
+    {
+    FILE * f=fopen("memory_sequence.txt","a");
+    if(f)
+    {fprintf(f, "%d,%d,%lld\n",mf->get_inst().dynamic_warp_id(),mf->get_inst().pc,mf->get_addr());
+    }
+    fclose(f);
+    }
+*/
    // The packet size varies depending on the type of request: 
    // - For write request and atomic request, the packet contains the data 
    // - For read request (i.e. not write nor atomic), the packet only has control metadata
@@ -3315,7 +3498,18 @@ void simt_core_cluster::icnt_cycle()
             // data response
             if( !m_core[cid]->ldst_unit_response_buffer_full() ) {
                 m_response_fifo.pop_front();
+                //if(mf->get_L2_miss_info()==true)
                 m_memory_stats->memlatstat_read_done(mf);
+                if(mf->get_L2_miss_info()==true)
+                m_memory_stats->memlatstat_read_done_L2_hit(mf);
+                else
+                m_memory_stats->memlatstat_read_done_L2_miss(mf);
+                if(!mf->is_write())
+                {m_memory_stats->record_batch_latency(mf);
+                 long long latency=gpu_sim_cycle+gpu_tot_sim_cycle-mf->get_timestamp();
+                 if((mf->get_Tm_stamp()+latency>T_mem)&&(mf->get_sid()==0)&&(mf->get_access_type()==GLOBAL_ACC_R))
+                  T_mem=mf->get_Tm_stamp()+latency;
+                }
                 m_core[cid]->accept_ldst_unit_response(mf);
             }
         }

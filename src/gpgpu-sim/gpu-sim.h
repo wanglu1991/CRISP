@@ -275,6 +275,14 @@ struct memory_config {
 // global counters and flags (please try not to add to this list!!!)
 extern unsigned long long  gpu_sim_cycle;
 extern unsigned long long  gpu_tot_sim_cycle;
+extern unsigned long long  T_mem;
+extern unsigned long long  T_LCP_stall;
+extern unsigned long long  T_CSP_stall;
+extern unsigned long long  T_compute;
+extern unsigned long long accum_T_mem;
+extern unsigned long long accum_T_LCP_stall;
+extern unsigned long long accum_T_CSP_stall;
+extern unsigned long long accum_T_compute;
 extern bool g_interactive_debugger_enabled;
 
 class gpgpu_sim_config : public power_config, public gpgpu_functional_sim_config {
@@ -336,6 +344,7 @@ private:
     unsigned gpu_max_cycle_opt;
     unsigned gpu_max_insn_opt;
     unsigned gpu_max_cta_opt;
+    unsigned gpu_max_issue_kernel;
     char *gpgpu_runtime_stat;
     bool  gpgpu_flush_l1_cache;
     bool  gpgpu_flush_l2_cache;
@@ -484,7 +493,9 @@ private:
 
 public:
    unsigned long long  gpu_sim_insn;
+   unsigned long long  gpu_warp_sim_insn;
    unsigned long long  gpu_tot_sim_insn;
+   unsigned long long  gpu_tot_warp_sim_insn;
    unsigned long long  gpu_sim_insn_last_update;
    unsigned gpu_sim_insn_last_update_sid;
 

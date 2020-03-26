@@ -54,7 +54,17 @@ void Scoreboard::printContents() const
 		printf("\n");
 	}
 }
+bool Scoreboard::checkOutstandingload()
+{  bool empty=true;
+	for(unsigned i=0; i<longopregs.size(); i++) {
+		if(!longopregs[i].empty())
+			{empty=false;
+			 break;
+			}
+	}
+   return empty;
 
+}
 void Scoreboard::reserveRegister(unsigned wid, unsigned regnum) 
 {
 	if( !(reg_table[wid].find(regnum) == reg_table[wid].end()) ){
@@ -158,6 +168,33 @@ bool Scoreboard::checkCollision( unsigned wid, const class inst_t *inst ) const
 		}
 	return false;
 }
+
+bool Scoreboard::check_long_memory_stall( unsigned wid, const class inst_t *inst ) const
+{
+	// Get list of all input and output registers
+	std::set<int> inst_regs;
+
+	if(inst->out[0] > 0) inst_regs.insert(inst->out[0]);
+	if(inst->out[1] > 0) inst_regs.insert(inst->out[1]);
+	if(inst->out[2] > 0) inst_regs.insert(inst->out[2]);
+	if(inst->out[3] > 0) inst_regs.insert(inst->out[3]);
+	if(inst->in[0] > 0) inst_regs.insert(inst->in[0]);
+	if(inst->in[1] > 0) inst_regs.insert(inst->in[1]);
+	if(inst->in[2] > 0) inst_regs.insert(inst->in[2]);
+	if(inst->in[3] > 0) inst_regs.insert(inst->in[3]);
+	if(inst->pred > 0) inst_regs.insert(inst->pred);
+	if(inst->ar1 > 0) inst_regs.insert(inst->ar1);
+	if(inst->ar2 > 0) inst_regs.insert(inst->ar2);
+
+	// Check for collision, get the intersection of reserved registers and instruction registers
+	std::set<int>::const_iterator it2;
+	for ( it2=inst_regs.begin() ; it2 != inst_regs.end(); it2++ )
+		if(longopregs[wid].find(*it2) != longopregs[wid].end()) {
+			return true;
+		}
+	return false;
+}
+
 
 bool Scoreboard::pendingWrites(unsigned wid) const
 {

@@ -45,7 +45,9 @@ public:
     void releaseRegister(unsigned wid, unsigned regnum);
 
     bool checkCollision(unsigned wid, const inst_t *inst) const;
+    bool check_long_memory_stall(unsigned wid, const inst_t *inst) const;
     bool pendingWrites(unsigned wid) const;
+    bool checkOutstandingload();
     void printContents() const;
     const bool islongop(unsigned warp_id, unsigned regnum);
 private:
