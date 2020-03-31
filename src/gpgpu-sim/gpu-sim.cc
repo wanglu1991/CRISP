@@ -81,14 +81,14 @@ bool g_interactive_debugger_enabled=false;
 
 unsigned long long  gpu_sim_cycle = 0;
 unsigned long long  gpu_tot_sim_cycle = 0;
-unsigned long long  T_mem =0;
-unsigned long long  T_LCP_stall=0;
-unsigned long long  T_CSP_stall=0;
-unsigned long long  T_compute=0;
-unsigned long long accum_T_mem=0;
-unsigned long long accum_T_LCP_stall=0;
-unsigned long long accum_T_CSP_stall=0;
-unsigned long long accum_T_compute=0;
+unsigned long long  T_mem[28] ={0};
+unsigned long long  T_LCP_stall[28]={0};
+unsigned long long  T_CSP_stall[28]={0};
+unsigned long long  T_compute[28]={0};
+unsigned long long accum_T_mem[28]={0};
+unsigned long long accum_T_LCP_stall[28]={0};
+unsigned long long accum_T_CSP_stall[28]={0};
+unsigned long long accum_T_compute[28]={0};
 // performance counter for stalls due to congestion.
 unsigned int gpu_stall_dramfull = 0; 
 unsigned int gpu_stall_icnt2sh = 0;
@@ -702,10 +702,12 @@ void gpgpu_sim::init()
 {
     // run a CUDA grid on the GPU microarchitecture simulator
     gpu_sim_cycle = 0;
-    T_mem=0;
-    T_LCP_stall=0;
-    T_CSP_stall=0;
-    T_compute=0;
+    for(int i=0;i<28;i++)
+    {T_mem[i]=0;
+    T_LCP_stall[i]=0;
+    T_CSP_stall[i]=0;
+    T_compute[i]=0;
+    }
     gpu_sim_insn = 0;
     gpu_warp_sim_insn=0;
     last_gpu_sim_insn = 0;
@@ -744,10 +746,13 @@ void gpgpu_sim::init()
 void gpgpu_sim::update_stats() {
     m_memory_stats->memlatstat_lat_pw();
     gpu_tot_sim_cycle += gpu_sim_cycle;
-    accum_T_mem+=T_mem;
-    accum_T_compute+=T_compute;
-    accum_T_LCP_stall+=T_LCP_stall;
-    accum_T_CSP_stall+=T_CSP_stall;
+    for(int i=0;i<28;i++)
+    {
+    accum_T_mem[i]+=T_mem[i];
+    accum_T_compute[i]+=T_compute[i];
+    accum_T_LCP_stall[i]+=T_LCP_stall[i];
+    accum_T_CSP_stall[i]+=T_CSP_stall[i];
+    }
     gpu_tot_sim_insn += gpu_sim_insn;
     gpu_tot_warp_sim_insn+=gpu_warp_sim_insn;
 }
@@ -926,15 +931,17 @@ void gpgpu_sim::gpu_print_stat()
    printf("gpu_tot_warp_insn=%lld\n",gpu_tot_warp_sim_insn+gpu_warp_sim_insn);
    printf("gpu_tot_ipc = %12.4f\n", (float)(gpu_tot_sim_insn+gpu_sim_insn) / (gpu_tot_sim_cycle+gpu_sim_cycle));
    printf("gpu_tot_issued_cta = %lld\n", gpu_tot_issued_cta);
-   printf("L_mem:%lld\n",T_mem);
-   printf("T_CSP_stall:%lld\n",T_CSP_stall);
-   printf("T_LCP_stall:%lld\n",T_LCP_stall);
-   printf("T_compute:%lld\n", T_compute);
-   printf("accum_L_mem:%lld\n",accum_T_mem+T_mem);
-   printf("accum_T_CSP_stall:%lld\n",accum_T_CSP_stall+T_CSP_stall);
-   printf("accum_T_LCP_stall:%lld\n",accum_T_LCP_stall+T_LCP_stall);
-   printf("accum_T_compute:%lld\n", accum_T_compute+T_compute);
-
+   for(int i=0;i<28;i++)
+   {
+   printf("L_mem:%lld,%d\n",T_mem[i],i);
+   printf("T_CSP_stall:%lld,%d\n",T_CSP_stall[i],i);
+   printf("T_LCP_stall:%lld,%d\n",T_LCP_stall[i],i);
+   printf("T_compute:%lld,%d\n", T_compute[i],i);
+   printf("accum_L_mem:%lld,%d\n",accum_T_mem[i]+T_mem[i],i);
+   printf("accum_T_CSP_stall:%lld,%d\n",accum_T_CSP_stall[i]+T_CSP_stall[i],i);
+   printf("accum_T_LCP_stall:%lld,%d\n",accum_T_LCP_stall[i]+T_LCP_stall[i],i);
+   printf("accum_T_compute:%lld,%d\n", accum_T_compute[i]+T_compute[i],i);
+   }
 
    std::string name="kernel_"+m_executed_kernel_names[0]+".txt";
    FILE * interval=fopen(name.c_str(),"a");

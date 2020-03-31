@@ -889,9 +889,9 @@ void scheduler_unit::cycle()
                                 warp_inst_issued = true;
                             }
                             else{
-                            	if((!m_scoreboard->checkOutstandingload())&&(m_shader->get_sid()==0))
+                            	if((!m_scoreboard->checkOutstandingload()))
                             	 ld_stall++;
-                            	if((m_scoreboard->checkOutstandingload())&&(m_shader->get_sid()==0))
+                            	if((m_scoreboard->checkOutstandingload()))
                             	{
                             		store_stall++;
 
@@ -916,10 +916,9 @@ void scheduler_unit::cycle()
                                 }
                                 else
                                 {
-                                if(m_shader->get_sid()==0)
-                                {sfu_stall++;
-                                 //T_compute++;
-                                }
+
+                                	sfu_stall++;
+
                                 }
                             }
 
@@ -930,11 +929,7 @@ void scheduler_unit::cycle()
                         //check arithmetic RAW or long memory latency RAW. As long as one warp is stalled due to arithmetic RAW, this cycle should be regarded as compute cycles.
                         if(!m_scoreboard->check_long_memory_stall(warp_id, pI)) //arithmetic RAW
                         	arithmetic_stall++;
-                        //
-                        //if(m_shader->get_sid()==0)
-                          //      {T_LCP_stall++;
-                            //    T_mem++;
-                            //	}
+
                     }
                 }
             } else if( valid ) {
@@ -966,8 +961,8 @@ void scheduler_unit::cycle()
                     m_last_supervised_issued = supervised_iter;
                 }
             }
-            if(m_shader->get_sid()==0)
-            {T_compute++;
+           // if(m_shader->get_sid()==0)
+            {T_compute[m_shader->get_sid()]++;
              record=1;
             }
             break;
@@ -977,24 +972,22 @@ void scheduler_unit::cycle()
     // issue stall statistics:
     if( !valid_inst ) 
     { m_stats->shader_cycle_distro[0]++; // idle or control hazard
-      if(m_shader->get_sid()==0)
-        {T_compute++;
+     // if(m_shader->get_sid()==0)
+        {T_compute[m_shader->get_sid()]++;
          record=1;
         }
     }
     else if( !ready_inst ) 
     {
         m_stats->shader_cycle_distro[1]++;
-        if(m_shader->get_sid()==0)
-        { if(arithmetic_stall>0)
-          T_compute++;
+        if(arithmetic_stall>0)
+          T_compute[m_shader->get_sid()]++;
         else
         {
-          T_LCP_stall++;
-          T_mem++;
+          T_LCP_stall[m_shader->get_sid()]++;
+          T_mem[m_shader->get_sid()]++;
         }
-          record=1;
-        }
+
         // waiting for RAW hazards (possibly due to memory)
     }
     else if( !issued_inst ) 
@@ -1002,17 +995,17 @@ void scheduler_unit::cycle()
 
         m_stats->shader_cycle_distro[2]++; // pipeline stalled
         if(store_stall>0)
-        	T_CSP_stall++;
+        	T_CSP_stall[m_shader->get_sid()]++;
         else
         {
         	if(ld_stall>0)
         	{
-        		T_mem++;
-        		T_LCP_stall++;
+        		T_mem[m_shader->get_sid()]++;
+        		T_LCP_stall[m_shader->get_sid()]++;
         	}
         	else
-        	{	if(m_shader->get_sid()==0)
-        		T_compute++;
+        	{
+        		T_compute[m_shader->get_sid()]++;
         }
         }
     }
@@ -3454,8 +3447,8 @@ void simt_core_cluster::icnt_inject_request_packet(class mem_fetch *mf)
     case L2_WR_ALLOC_R: m_stats->gpgpu_n_mem_l2_write_allocate++; break;
     default: assert(0);
     }
-    if(!mf->get_is_write()&& (mf->get_sid()==0)&&(mf->get_access_type()==GLOBAL_ACC_R))
-    mf->set_Tm_stamp(T_mem);
+    if(!mf->get_is_write()&& (mf->get_access_type()==GLOBAL_ACC_R))
+    mf->set_Tm_stamp(T_mem[mf->get_sid()]);
 
  /*
     if((mf->get_access_type()==GLOBAL_ACC_R)&&(mf->get_sid()==0))
@@ -3507,8 +3500,8 @@ void simt_core_cluster::icnt_cycle()
                 if(!mf->is_write())
                 {m_memory_stats->record_batch_latency(mf);
                  long long latency=gpu_sim_cycle+gpu_tot_sim_cycle-mf->get_timestamp();
-                 if((mf->get_Tm_stamp()+latency>T_mem)&&(mf->get_sid()==0)&&(mf->get_access_type()==GLOBAL_ACC_R))
-                  T_mem=mf->get_Tm_stamp()+latency;
+                 if((mf->get_Tm_stamp()+latency>T_mem[mf->get_sid()])&&(mf->get_access_type()==GLOBAL_ACC_R))
+                  T_mem[mf->get_sid()]=mf->get_Tm_stamp()+latency;
                 }
                 m_core[cid]->accept_ldst_unit_response(mf);
             }
